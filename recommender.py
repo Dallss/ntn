@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer, util
+from image_url import FragranticaImageExtractor 
 
 class SemanticPerfumeRecommender:
     def __init__(
@@ -44,6 +45,8 @@ class SemanticPerfumeRecommender:
                 and row[f"mainaccord{i}"] != ""
             ]
 
+            imageUrl = FragranticaImageExtractor.get_perfume_image(row["url"])
+
             results.append({
                 "perfume": row["Perfume"],
                 "brand": row["Brand"],
@@ -54,7 +57,8 @@ class SemanticPerfumeRecommender:
                 "middle_notes": row.get("Middle"),
                 "base_notes": row.get("Base"),
                 "main_accords": main_accords,
-                "similarity_score": float(row["similarity"])
+                "similarity_score": float(row["similarity"]),
+                "url": imageUrl
             })
 
         return results

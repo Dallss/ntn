@@ -1,22 +1,21 @@
-# embed_perfumes_scaled.py
+# embed_perfumes_scaled_v1.py
 import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer
-import os
 
 # -------------------------------
 # CONFIG
 # -------------------------------
-CSV_PATH = "fra_cleaned.csv"         # input CSV
+CSV_PATH = "dataset/fra_cleaned.csv"         # input CSV
 EMBEDDINGS_NPY = "embeddings.npy"    # embeddings file
-METADATA_CSV = "metadata.csv"        # metadata file
+METADATA_CSV = "metadata_v1.csv"     # new metadata file with URL
 ENCODING = "windows-1252"
 SEPARATOR = ";"                       # semicolon CSV
 MODEL_NAME = "all-MiniLM-L6-v2"
 BATCH_SIZE = 32
 
 # -------------------------------
-# LOAD CSV
+# LOAD CSV / Clean Data
 # -------------------------------
 print(f"Loading CSV from {CSV_PATH} ...")
 df = pd.read_csv(CSV_PATH, encoding=ENCODING, sep=SEPARATOR, on_bad_lines="skip")
@@ -54,15 +53,25 @@ embeddings = model.encode(df['semantic_text'].to_list(), batch_size=BATCH_SIZE, 
 embeddings = np.vstack(embeddings)  # convert to contiguous NumPy array
 
 # -------------------------------
-# SAVE EMBEDDINGS AND METADATA SEPARATELY
+# SAVE EMBEDDINGS
 # -------------------------------
 print(f"Saving embeddings to {EMBEDDINGS_NPY} ...")
 np.save(EMBEDDINGS_NPY, embeddings)
 
-print(f"Saving metadata to {METADATA_CSV} ...")
-metadata_cols = ['Perfume','Brand','Gender','Top','Middle','Base',
+# -------------------------------
+# ADD URL COLUMN
+# -------------------------------
+if 'url' not in df.columns:
+    print("Adding placeholder 'url' column ...")
+    df['url'] = ""  # optionally, fill with actual URLs if available
+
+# -------------------------------
+# SAVE METADATA WITH URL
+# -------------------------------
+metadata_cols = ['url', 'Perfume','Brand','Gender','Top','Middle','Base',
                  'mainaccord1','mainaccord2','mainaccord3','mainaccord4','mainaccord5',
                  'Rating Value','Rating Count']
+
 df[metadata_cols].to_csv(METADATA_CSV, sep=";", index=False)
 
-print(f"Done! Saved {len(df)} perfumes and embeddings of shape {embeddings.shape}.")
+print(f"Done! Saved {len(df)} perfumes and embeddings of shape {embeddings.shape} with URL column.")

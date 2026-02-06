@@ -1,12 +1,13 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS  # <-- import this
+from flask_cors import CORS
 from recommender import SemanticPerfumeRecommender
+import process_input_utils as ProcessInput
 
 # -------------------------------
 # CONFIG
 # -------------------------------
 EMBEDDINGS_NPY = "embeddings.npy"
-METADATA_CSV = "metadata.csv"
+METADATA_CSV = "metadata_v1.csv"
 MODEL_NAME = "all-MiniLM-L6-v2"
 TOP_N = 5
 
@@ -18,6 +19,9 @@ recommender = SemanticPerfumeRecommender(
     metadata_path=METADATA_CSV,
     model_name=MODEL_NAME
 )
+
+# Inject model into the utility module
+# ProcessInput.set_model()
 
 # -------------------------------
 # FLASK APP
@@ -41,6 +45,17 @@ def recommend():
     )
 
     return jsonify({"recommendations": results})
+
+
+
+# @app.route("/is-related", methods=["POST"])
+# def isRelated():
+#     data = request.get_json()
+#     if not data or "query" not in data:
+#         return jsonify({"error": "Missing 'query' in request"}), 400
+
+#     result = ProcessInput.is_related_to_perfume(data["query"])
+#     return jsonify({"is-related": result})
 
 # -------------------------------
 # CHAT ENDPOINT
