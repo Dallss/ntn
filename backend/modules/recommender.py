@@ -26,7 +26,7 @@ class SemanticPerfumeRecommender:
             f"with embeddings shape {self.embeddings.shape}"
         )
 
-    def recommend(self, query: str, top_n: int = 5) -> list[dict]:
+    def recommend(self, query: str, top_n: int = 10) -> list[dict]:
         # Embed user query
         query_embedding = self.model.encode(query)
 

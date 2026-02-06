@@ -13,7 +13,7 @@ from modules.ollama_client import OllamaHandler
 # CONFIGURATION
 # -------------------------------
 _MODEL_NAME = "all-MiniLM-L6-v2"
-_OLLAMA_MODEL = "perfume-extractor:latest"  # include :latest for Ollama
+_OLLAMA_MODEL = "perfume-extractor:beta"  # include :latest for Ollama
 TOP_N = 5
 
 # -------------------------------
@@ -81,20 +81,36 @@ def chat():
 
     # 1. Extract perfume info using Ollama
     ollama_data = OLLAMA.ask_model(user_query)
-
     print(ollama_data)
+    details = APP_STATE['perfume']['details']
+
     # Update APP_STATE with the latest details if available
     if "details" in ollama_data:
         APP_STATE["perfume"]["details"] = ollama_data["details"]
 
+    if not details.get("gender"):
+        APP_STATE["perfume"]["llm-intent"] = "ask for gender"
+    elif not details.get("descriptive_words"):
+        APP_STATE["perfume"]["llm-intent"] = "ask for descriptive words"
+    else:
+        APP_STATE["perfume"]["llm-intent"] = "end-conversation"
 
-    details = APP_STATE['perfume']['details']
+   
+    # make string for cosine sim
+    parts = []
 
-    # Convert to string for embedding
-    details_str = f"Gender: {details['gender']}, Price range: {details['price_range']}, " \
-                f"Accords: {', '.join(details['accords'])}, " \
-                f"Descriptive words: {', '.join(details['descriptive_words'])}"
+    if details.get("accords"):
+        accords_str = ", ".join(details["accords"])
+        parts.append(f"Accords: {accords_str}")
 
+    if details.get("descriptive_words"):
+        desc_str = ", ".join(details["descriptive_words"])
+        parts.append(f"Descriptive words: {desc_str}")
+
+    # Combine only non-empty parts
+    details_str = "; ".join(parts)
+    print(details_str)
+    
     # 2. Get recommendations based on raw query
     results = RECOMMENDER.recommend(
         query=details_str,
@@ -105,8 +121,8 @@ def chat():
     gender_filter = APP_STATE["perfume"]["details"].get("gender")
 
     gender_map = {
-        "male": ["male", "men"],
-        "female": ["female", "women"]
+        "male": ["male", "men", "unisex"],       # allow unisex
+        "female": ["female", "women", "unisex"] 
     }
 
     if gender_filter:

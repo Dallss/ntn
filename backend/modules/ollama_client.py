@@ -2,7 +2,7 @@ import requests
 import json
 
 _ollama_base_url = "http://localhost:11434"
-_ollama_model_file = "perfume-extractor:latest"
+_ollama_model_file = "perfume-extractor:beta"
 
 class OllamaHandler:
     def __init__(self, model_file=_ollama_model_file, base_url=_ollama_base_url):
