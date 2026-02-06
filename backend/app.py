@@ -4,34 +4,47 @@ from sentence_transformers import SentenceTransformer
 
 from modules.recommender import SemanticPerfumeRecommender
 import modules.process_input_utils as ProcessInput
-
+from modules.ollama_client import OllamaHandler
 
 
 # -------------------------------
 # CONFIG
 # -------------------------------
 
-# model
+# MODEL
 _model_name = "all-MiniLM-L6-v2"
 
-# recommender
+# RECOMENDER
 _embeddings_npy = "embeddings.npy"
 _metadata_csv = "metadata_v1.csv"
 MODEL_NAME = "all-MiniLM-L6-v2"
 TOP_N = 5
 
-# Load Model
-MODEL = SentenceTransformer(_model_name)
-print(f"Embedding model '{_model_name}' loaded.")
+# OLLAMA
+_ollama_base_url = "http://localhost:11434"
+_ollama_model = "llama3.2:3b"
+
+
 
 # -------------------------------
 # INIT RECOMMENDER
 # -------------------------------
-recommender = SemanticPerfumeRecommender(
+
+# MODEL
+MODEL = SentenceTransformer(_model_name)
+print(f"Embedding model '{_model_name}' loaded.")
+
+# OLLAMA
+OLLAMA = OllamaHandler()
+print("Ollama loaded.")
+
+# RECOMENDER
+RECOMMENDER = SemanticPerfumeRecommender(
     embeddings_path=_embeddings_npy,
     metadata_path=_metadata_csv,
     model=MODEL
 )
+print("Recommender loaded.")
 
 
 # -------------------------------
@@ -50,7 +63,7 @@ def recommend():
     if not data or "query" not in data:
         return jsonify({"error": "Missing 'query' in request"}), 400
 
-    results = recommender.recommend(
+    results = RECOMMENDER.recommend(
         query=data["query"],
         top_n=data.get("top_n", TOP_N)
     )
@@ -79,7 +92,7 @@ def chat():
 
     user_input = data["querry"]
     response_text = f"You said: {user_input}"
-    perfume_results = recommender.recommend(query=user_input, top_n=TOP_N)
+    perfume_results = RECOMMENDER.recommend(query=user_input, top_n=TOP_N)
 
     return jsonify({
         "text": response_text,
