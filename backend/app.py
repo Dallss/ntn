@@ -1,6 +1,6 @@
 import time
 import json
-import requests
+import logging
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from sentence_transformers import SentenceTransformer
@@ -8,13 +8,14 @@ from sentence_transformers import SentenceTransformer
 # Custom modules
 from modules.recommender import SemanticPerfumeRecommender
 from modules.ollama_client import OllamaHandler
+from modules.space import extract_descriptions
 
 # -------------------------------
 # CONFIGURATION
 # -------------------------------
 _MODEL_NAME = "all-MiniLM-L6-v2"
-_OLLAMA_MODEL = "perfume-extractor:beta"  # include :latest for Ollama
-TOP_N = 5
+_OLLAMA_MODEL = "perfume-extractor:beta"
+TOP_N = 12
 
 # -------------------------------
 # GLOBAL APP STATE
@@ -27,7 +28,7 @@ APP_STATE = {
             "accords": [],
             "descriptive_words": []
         },
-        "llm-intent": None
+        "llm-intent": "inquire"
     }
 }
 
@@ -45,22 +46,41 @@ OLLAMA = None
 RECOMMENDER = None
 
 # -------------------------------
+# LOGGING SETUP
+# -------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+# -------------------------------
 # UTILS
 # -------------------------------
+def normalize_gender(raw_gender: str) -> str:
+    if not raw_gender:
+        return "unisex"
+    g = raw_gender.lower().strip()
+    if g in ["male", "man", "men", "boy"]:
+        return "male"
+    elif g in ["female", "woman", "women", "girl"]:
+        return "female"
+    else:
+        return "unisex"
+
 def wait_for_ollama(timeout=30):
-    """Ensure Ollama is awake before Flask starts accepting traffic."""
-    print(f"Waiting for Ollama model '{_OLLAMA_MODEL}'...")
+    logger.info(f"Waiting for Ollama model '{_OLLAMA_MODEL}'...")
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
             res = OLLAMA.ask_model("ping")
             if "error" not in res:
-                print("Ollama is ready!")
+                logger.info("Ollama is ready!")
                 return True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Ollama ping failed: {e}")
         time.sleep(2)
-    print("Warning: Ollama not detected. Server starting anyway...")
+    logger.warning("Warning: Ollama not detected. Server starting anyway...")
 
 # -------------------------------
 # ENDPOINTS
@@ -69,25 +89,58 @@ def wait_for_ollama(timeout=30):
 def chat():
     data = request.get_json()
     if not data or "query" not in data:
+        logger.error("Missing 'query' in request")
         return jsonify({"error": "Missing 'query' in request"}), 400
 
     user_query = data["query"]
+    logger.info(f"Received query: {user_query}")
 
-    # Build query dictionary for keeping state (optional)
+    # Extract descriptions
+    spaceyextract = extract_descriptions(user_query)
+    logger.info(f"Extracted descriptions: {spaceyextract}")
+
+    # Update descriptive words
+    new_descriptive = set()
+    for category in ["descriptive_words", "mood", "texture", "setting", "common_noun_places"]:
+        if spaceyextract.get(category):
+            new_descriptive.update(spaceyextract[category])
+    
+    if new_descriptive:
+        existing = set(APP_STATE["perfume"]["details"].get("descriptive_words", []))
+        APP_STATE["perfume"]["details"]["descriptive_words"] = list(existing.union(new_descriptive))
+        logger.info(f"Updated descriptive words: {APP_STATE['perfume']['details']['descriptive_words']}")
+
+    # Prepare Ollama query
     ollama_query = {
         "details": APP_STATE["perfume"]["details"],
-        "user-query": user_query
+        "user-query": user_query,
+        "llm-intent": APP_STATE["perfume"]["llm-intent"]
     }
+    ollama_query_str = json.dumps(ollama_query, indent=2)
 
-    # 1. Extract perfume info using Ollama
-    ollama_data = OLLAMA.ask_model(user_query)
-    print(ollama_data)
+    # -------------------
+    # Extract perfume info using Ollama
+    # -------------------
+    try:
+        ollama_data = OLLAMA.ask_model(ollama_query_str)
+        logger.info(f"Ollama response: {ollama_data}")
+
+        # Update APP_STATE from Ollama's 'details'
+        if "details" in ollama_data:
+            for key in ["gender", "price_range", "accords", "descriptive_words"]:
+                value = ollama_data["details"].get(key)
+                if value:
+                    if key == "gender":
+                        value = normalize_gender(value)
+                    APP_STATE["perfume"]["details"][key] = value
+                    logger.info(f"Updated {key} from Ollama: {value}")
+
+    except Exception as e:
+        logger.error(f"Ollama call failed: {e}")
+        ollama_data = {"llm-response": None}
+
+    # Update conversation state
     details = APP_STATE['perfume']['details']
-
-    # Update APP_STATE with the latest details if available
-    if "details" in ollama_data:
-        APP_STATE["perfume"]["details"] = ollama_data["details"]
-
     if not details.get("gender"):
         APP_STATE["perfume"]["llm-intent"] = "ask for gender"
     elif not details.get("descriptive_words"):
@@ -95,52 +148,50 @@ def chat():
     else:
         APP_STATE["perfume"]["llm-intent"] = "end-conversation"
 
-   
-    # make string for cosine sim
+    logger.info(f"APP_STATE after processing: {APP_STATE}")
+
+    # Prepare string for recommendation
     parts = []
-
     if details.get("accords"):
-        accords_str = ", ".join(details["accords"])
-        parts.append(f"Accords: {accords_str}")
-
+        parts.append(f"Accords: {', '.join(details['accords'])}")
     if details.get("descriptive_words"):
-        desc_str = ", ".join(details["descriptive_words"])
-        parts.append(f"Descriptive words: {desc_str}")
-
-    # Combine only non-empty parts
+        parts.append(f"Descriptive words: {', '.join(details['descriptive_words'])}")
     details_str = "; ".join(parts)
-    print(details_str)
-    
-    # 2. Get recommendations based on raw query
+    # logger.info(f"Details string for recommendation: {details_str}")
+
+    # Get recommendations
     results = RECOMMENDER.recommend(
         query=details_str,
         top_n=data.get("top_n", TOP_N)
     )
+    logger.info(f"Initial recommendations: {results}")
 
-    # Filter by gender if set
-    gender_filter = APP_STATE["perfume"]["details"].get("gender")
-
+    # ----- ROBUST GENDER FILTER -----
+    gender_filter = details.get("gender")
     gender_map = {
-        "male": ["male", "men", "unisex"],       # allow unisex
-        "female": ["female", "women", "unisex"] 
+        "male": ["male", "men", "unisex"],
+        "female": ["female", "women", "unisex"]
     }
 
     if gender_filter:
         gender_filter = gender_filter.lower().strip()
+        allowed_genders = gender_map.get(gender_filter, [])
+        logger.info(f"Filtering recommendations for gender: {gender_filter}, allowed: {allowed_genders}")
 
-    if gender_filter in gender_map:
-        allowed_genders = gender_map[gender_filter]
+        filtered_results = []
+        for row in results:
+            row_gender = str(row.get("gender", "")).lower().strip()
+            if row_gender in allowed_genders:
+                filtered_results.append(row)
+            else:
+                logger.debug(f"Excluding row with gender: {row_gender}")
 
-        results = [
-            row for row in results
-            if str(row.get("gender", "")).lower() in allowed_genders
-        ]
+        results = filtered_results
+        logger.info(f"Recommendations after gender filter: {results}")
 
-
-    # Use hard filters for gender
     return jsonify({
         "text": ollama_data.get("llm-response") or ollama_data.get("text") or "failed to get ollama response",
-        "extracted_data": ollama_data.get("details") or ollama_data.get("data") or {},
+        "extracted_data": APP_STATE['perfume']['details'],
         "recommendations": results
     })
 
@@ -150,17 +201,17 @@ def chat():
 if __name__ == "__main__":
     # Initialize heavy objects once
     MODEL = SentenceTransformer(_MODEL_NAME)
-    print(f"Embedding model '{_MODEL_NAME}' loaded.")
+    logger.info(f"Embedding model '{_MODEL_NAME}' loaded.")
 
     OLLAMA = OllamaHandler(model_file=_OLLAMA_MODEL)
-    print("Ollama handler initialized.")
+    logger.info("Ollama handler initialized.")
 
     RECOMMENDER = SemanticPerfumeRecommender(
         embeddings_path="embeddings.npy",
         metadata_path="metadata_v1.csv",
         model=MODEL
     )
-    print("Recommender system initialized.")
+    logger.info("Recommender system initialized.")
 
     # Wait for Ollama to be ready
     wait_for_ollama()
