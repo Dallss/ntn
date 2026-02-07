@@ -190,7 +190,7 @@ def chat():
         logger.info(f"Recommendations after gender filter: {results}")
 
     return jsonify({
-        "text": ollama_data.get("llm-response") or ollama_data.get("text") or "failed to get ollama response",
+        "text": ollama_data.get("llm-response") or ollama_data.get("text") or ollama_data.get("llm-intent") or "failed to get ollama response",
         "extracted_data": APP_STATE['perfume']['details'],
         "recommendations": results
     })
